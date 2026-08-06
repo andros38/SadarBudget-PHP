@@ -58,7 +58,7 @@ require __DIR__ . '/includes/header.php';
     <aside class="auth-showcase" aria-label="Ringkasan SadarBudget">
         <div class="auth-showcase-copy">
             <h2>Bangun kebiasaan keuangan yang lebih terarah.</h2>
-            <p>Akun Anda menyiapkan kategori awal, tabungan, laporan, serta backup data dalam satu ruang kerja.</p>
+            <p>Akun Anda menyiapkan kategori awal, laporan, serta backup data dalam satu ruang kerja.</p>
         </div>
         <div class="auth-benefits" aria-label="Fitur yang tersedia">
             <div>
@@ -71,13 +71,13 @@ require __DIR__ . '/includes/header.php';
                 <span class="auth-benefit-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
                 </span>
-                <span><strong>Rekapan otomatis</strong><small>Lihat pola bulanan dan tahunan tanpa menyusun tabel sendiri.</small></span>
+                <span><strong>Laporan otomatis</strong><small>Lihat pola bulanan dan tahunan tanpa menyusun tabel sendiri.</small></span>
             </div>
             <div>
                 <span class="auth-benefit-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 3 5 6v5c0 4.6 2.8 8.4 7 10 4.2-1.6 7-5.4 7-10V6l-7-3Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="m9 12 2 2 4-5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </span>
-                <span><strong>Kontrol data pribadi</strong><small>Ekspor, impor, atau bersihkan data dari halaman profil.</small></span>
+                <span><strong>Kontrol data pribadi</strong><small>Ekspor, impor, atau bersihkan data dari menu Data & Backup.</small></span>
             </div>
         </div>
     </aside>

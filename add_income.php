@@ -27,11 +27,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         $stmt = $pdo->prepare('INSERT INTO transactions (user_id, category_id, category_name_snapshot, type, amount, description, transaction_date) VALUES (?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([$userId, $categoryId, $category['name'], $type, $amount, $description ?: null, $date]);
+        auto_backup_after_financial_change($pdo, $userId, 'pemasukan-ditambah');
         flash('success', 'Pemasukan berhasil ditambahkan.');
         redirect('transactions.php');
     }
 }
-$pageTitle = 'Tambah Pemasukan';
+$pageTitle = 'Catat Pemasukan';
 require __DIR__ . '/includes/header.php';
 require __DIR__ . '/includes/transaction_form.php';
 require __DIR__ . '/includes/footer.php';

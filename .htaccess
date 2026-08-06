@@ -1,0 +1,20 @@
+# SadarBudget 2.0 — konfigurasi keamanan dan URL ekspor.
+Options -Indexes -MultiViews
+RewriteEngine On
+
+# Lindungi konfigurasi, schema, dan dokumentasi dari akses HTTP langsung.
+<FilesMatch "^(?:config(?:\.example)?\.php|schema\.sql|README\.md|CHANGELOG\.md|\.gitignore|\.gitattributes)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Hindari rewrite jika berkas atau direktori fisik memang ada.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+RewriteRule ^exports/pdf/(sadarbudget-laporan-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.pdf)$ exports/report_pdf.php?download_name=$1 [L,QSA,NC]
+RewriteRule ^exports/excel/(sadarbudget-laporan-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.xlsx)$ exports/report_excel.php?download_name=$1 [L,QSA,NC]

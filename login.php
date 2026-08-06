@@ -42,7 +42,7 @@ require __DIR__ . '/includes/header.php';
     <aside class="auth-showcase" aria-label="Ringkasan SadarBudget">
         <div class="auth-showcase-copy">
             <h2>Catat uang tanpa membuatnya rumit.</h2>
-            <p>Pantau uang tersedia, pengeluaran, tabungan, dan rekapan tahunan dalam satu tempat.</p>
+            <p>Pantau pemasukan, pengeluaran, kategori, dan laporan keuangan dalam satu ruang kerja.</p>
         </div>
         <div class="auth-benefits" aria-label="Keunggulan aplikasi">
             <div>
@@ -53,9 +53,9 @@ require __DIR__ . '/includes/header.php';
             </div>
             <div>
                 <span class="auth-benefit-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="22" height="22"><path d="M5 10.5C5 7.5 7.7 5 11 5h2c3.3 0 6 2.4 6 5.5V17a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6.5Z" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M9 5V3h6v2M19 11h2v4h-2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+                    <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M3 21h18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
                 </span>
-                <span><strong>Tabungan terarah</strong><small>Pisahkan dana sesuai tujuan dan tenggat.</small></span>
+                <span><strong>Laporan terstruktur</strong><small>Tinjau perubahan saldo dan pola transaksi tanpa perhitungan manual.</small></span>
             </div>
             <div>
                 <span class="auth-benefit-icon" aria-hidden="true">

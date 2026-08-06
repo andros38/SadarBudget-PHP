@@ -16,6 +16,12 @@ $totalRows = count($allTransactions);
 $totalPages = max(1, (int)ceil($totalRows / $perPage));
 $page = max(1, min($totalPages, (int)($_GET['page'] ?? 1)));
 $transactions = array_slice($allTransactions, ($page - 1) * $perPage, $perPage);
+$historyContext = ['month' => $month, 'type' => $type, 'page' => $page];
+$transactionActionUrl = static function (string $endpoint, array $transaction) use ($historyContext): string {
+    return $endpoint . '?' . http_build_query(array_merge($historyContext, [
+        'id' => (int)$transaction['row_id'],
+    ]));
+};
 
 $filterQuery = array_filter(['month' => $month, 'type' => $type]);
 $exportQuery = http_build_query($filterQuery);
@@ -31,32 +37,17 @@ $pageUrl = static function (int $targetPage) use ($filterQuery): string {
 $viewMeta = match ($type) {
     'income' => [
         'title' => 'Riwayat Pemasukan',
-        'description' => 'Menampilkan dana masuk sesuai periode yang dipilih.',
+        'description' => 'Menampilkan pemasukan sesuai periode yang dipilih.',
         'empty' => 'Tidak ada pemasukan untuk filter ini.',
     ],
     'expense' => [
-        'title' => 'Riwayat Pengeluaran Uang',
-        'description' => 'Menampilkan pengeluaran yang dibayarkan langsung dari uang.',
-        'empty' => 'Tidak ada pengeluaran uang untuk filter ini.',
-    ],
-    'savings_deposit' => [
-        'title' => 'Riwayat Transfer Tabungan',
-        'description' => 'Menampilkan perpindahan dana dari uang ke tujuan tabungan.',
-        'empty' => 'Tidak ada transfer ke tabungan untuk filter ini.',
-    ],
-    'savings_withdrawal' => [
-        'title' => 'Riwayat Pencairan Tabungan',
-        'description' => 'Menampilkan dana tabungan yang dikembalikan ke uang.',
-        'empty' => 'Tidak ada pencairan tabungan untuk filter ini.',
-    ],
-    'savings_spend' => [
-        'title' => 'Riwayat Penggunaan Tabungan',
-        'description' => 'Menampilkan pengeluaran yang dibayar langsung dari saldo tabungan.',
-        'empty' => 'Tidak ada penggunaan dana tabungan untuk filter ini.',
+        'title' => 'Riwayat Pengeluaran',
+        'description' => 'Menampilkan pengeluaran sesuai periode yang dipilih.',
+        'empty' => 'Tidak ada pengeluaran untuk filter ini.',
     ],
     default => [
-        'title' => 'Riwayat Transaksi',
-        'description' => 'Pemasukan, pengeluaran, transfer, pencairan, dan penggunaan tabungan dalam satu riwayat.',
+        'title' => 'Riwayat Keuangan',
+        'description' => 'Pemasukan dan pengeluaran tercatat dalam satu riwayat keuangan.',
         'empty' => 'Tidak ada transaksi untuk filter ini.',
     ],
 };
@@ -68,7 +59,7 @@ require __DIR__ . '/includes/header.php';
 ?>
 <div class="page-heading transaction-heading">
     <div>
-        <span class="eyebrow">Mutasi keuangan</span>
+        <span class="eyebrow">Catatan transaksi</span>
         <h1><?= e($viewMeta['title']) ?></h1>
         <p class="muted"><?= e($viewMeta['description']) ?></p>
     </div>
@@ -127,29 +118,41 @@ require __DIR__ . '/includes/header.php';
     </div>
     <div class="table-wrap responsive-table transaction-table-wrap">
         <table class="transaction-table">
-            <thead><tr><th>Tanggal</th><th>Kategori / Tujuan</th><th>Keterangan</th><th>Jenis</th><th class="text-right">Nominal</th></tr></thead>
+            <colgroup>
+                <col class="transaction-col-date">
+                <col class="transaction-col-category">
+                <col class="transaction-col-description">
+                <col class="transaction-col-type">
+                <col class="transaction-col-amount">
+                <col class="transaction-col-actions">
+            </colgroup>
+            <thead><tr><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Jenis</th><th class="text-right">Nominal</th><th class="text-right">Aksi</th></tr></thead>
             <tbody>
                 <?php if (!$transactions): ?>
-                    <tr><td colspan="5" class="empty"><?= e($viewMeta['empty']) ?></td></tr>
+                    <tr><td colspan="6" class="empty"><?= e($viewMeta['empty']) ?></td></tr>
                 <?php else: foreach ($transactions as $t): ?>
-                    <?php
-                        if ($t['type'] === 'savings_spend') {
-                            $categoryLabel = transaction_category_history_name($t['category_name'] ?? null) . ' — ' . savings_goal_history_name($t['goal_name'] ?? null, null, (int)($t['savings_goal_id'] ?? 0));
-                        } elseif ($t['source'] === 'savings') {
-                            $categoryLabel = 'Tabungan — ' . savings_goal_history_name($t['goal_name'] ?? null, null, (int)($t['savings_goal_id'] ?? 0));
-                        } else {
-                            $categoryLabel = transaction_category_history_name($t['category_name'] ?? null);
-                        }
-                    ?>
+                    <?php $categoryLabel = transaction_category_history_name($t['category_name'] ?? null); ?>
                     <tr>
                         <td data-label="Tanggal"><?= e(format_date_id($t['transaction_date'])) ?></td>
-                        <td data-label="Kategori / Tujuan"><span class="mobile-card-title"><?= e($categoryLabel) ?></span><span class="mobile-card-date"><?= e(format_date_id($t['transaction_date'])) ?></span></td>
+                        <td data-label="Kategori"><span class="mobile-card-title"><?= e($categoryLabel) ?></span><span class="mobile-card-date"><?= e(format_date_id($t['transaction_date'])) ?></span></td>
                         <td data-label="Keterangan"><?= e(($t['description'] ?? '') !== '' ? $t['description'] : '-') ?></td>
                         <td data-label="Jenis" class="mobile-card-side">
                             <span class="mobile-card-side-amount amount <?= e(transaction_amount_class($t['type'])) ?>"><?= e(transaction_amount_prefix($t['type'])) ?><?= format_rupiah($t['amount']) ?></span>
                             <span class="badge <?= e(transaction_badge_class($t['type'])) ?>"><?= e(transaction_type_label($t['type'])) ?></span>
+                            <div class="transaction-row-actions transaction-row-actions-mobile" aria-label="Aksi transaksi">
+                                <a class="transaction-action edit" href="<?= e($transactionActionUrl('edit_transaction.php', $t)) ?>" aria-label="Ubah transaksi">Ubah</a>
+                                <a class="transaction-action delete" href="<?= e($transactionActionUrl('delete_transaction.php', $t)) ?>" aria-label="Hapus transaksi">Hapus</a>
+                            </div>
                         </td>
-                        <td data-label="Nominal" class="text-right amount desktop-card-amount <?= e(transaction_amount_class($t['type'])) ?>"><?= e(transaction_amount_prefix($t['type'])) ?><?= format_rupiah($t['amount']) ?></td>
+                        <td data-label="Nominal" class="text-right desktop-card-amount transaction-amount-cell">
+                            <span class="amount <?= e(transaction_amount_class($t['type'])) ?>"><?= e(transaction_amount_prefix($t['type'])) ?><?= format_rupiah($t['amount']) ?></span>
+                        </td>
+                        <td data-label="Aksi" class="text-right desktop-card-actions transaction-actions-cell">
+                            <div class="transaction-row-actions" aria-label="Aksi transaksi">
+                                <a class="transaction-action edit" href="<?= e($transactionActionUrl('edit_transaction.php', $t)) ?>">Ubah</a>
+                                <a class="transaction-action delete" href="<?= e($transactionActionUrl('delete_transaction.php', $t)) ?>">Hapus</a>
+                            </div>
+                        </td>
                     </tr>
                 <?php endforeach; endif; ?>
             </tbody>

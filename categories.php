@@ -32,11 +32,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($existing) {
                 $stmt = $pdo->prepare('UPDATE categories SET is_active=1, name=? WHERE id=? AND user_id=?');
                 $stmt->execute([$name, (int)$existing['id'], $userId]);
+                auto_backup_after_financial_change($pdo, $userId, 'kategori-diubah');
                 flash('success', 'Kategori “' . $name . '” diaktifkan kembali.');
                 redirect('categories.php');
             } else {
                 $stmt = $pdo->prepare('INSERT INTO categories (user_id, name, type, is_active) VALUES (?, ?, ?, 1)');
                 $stmt->execute([$userId, $name, $type]);
+                auto_backup_after_financial_change($pdo, $userId, 'kategori-diubah');
                 flash('success', 'Kategori “' . $name . '” berhasil ditambahkan.');
                 redirect('categories.php');
             }
@@ -52,6 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($categoryName !== false) {
             $stmt = $pdo->prepare('UPDATE categories SET is_active=0 WHERE id=? AND user_id=?');
             $stmt->execute([$id, $userId]);
+            auto_backup_after_financial_change($pdo, $userId, 'kategori-diubah');
             flash('success', 'Kategori “' . $categoryName . '” dinonaktifkan. Nama kategori pada transaksi lama tetap dipertahankan.');
         }
         redirect('categories.php');
@@ -59,11 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $stmt = $pdo->prepare("SELECT c.*,
-    (
-        (SELECT COUNT(*) FROM transactions t WHERE t.category_id=c.id)
-        +
-        (SELECT COUNT(*) FROM savings_entries se WHERE se.category_id=c.id AND se.type='spend')
-    ) AS transaction_count
+    (SELECT COUNT(*) FROM transactions t WHERE t.category_id=c.id) AS transaction_count
     FROM categories c
     WHERE c.user_id=? AND c.is_active=1
     ORDER BY c.type, c.name");
@@ -75,13 +74,13 @@ $categoryGroups = [
     'expense' => array_values(array_filter($categories, static fn(array $category): bool => $category['type'] === 'expense')),
 ];
 
-$pageTitle = 'Kelola Kategori';
+$pageTitle = 'Kategori Transaksi';
 require __DIR__ . '/includes/header.php';
 ?>
 <div class="page-heading category-page-heading">
     <div>
         <span class="eyebrow">Pengaturan transaksi</span>
-        <h1>Kelola Kategori</h1>
+        <h1>Kategori Transaksi</h1>
         <p class="muted">Kelompokkan pemasukan dan pengeluaran agar riwayat serta laporan lebih mudah dianalisis.</p>
     </div>
     <div class="category-total-chip" aria-label="Jumlah seluruh kategori">

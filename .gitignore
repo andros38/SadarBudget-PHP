@@ -1,0 +1,23 @@
+# Konfigurasi lokal dan rahasia
+/config.php
+
+# Data yang dihasilkan aplikasi
+/storage/auto-backups/*
+!/storage/auto-backups/.gitkeep
+!/storage/auto-backups/.htaccess
+!/storage/auto-backups/web.config
+!/storage/auto-backups/index.html
+/uploads/profiles/*
+!/uploads/profiles/.gitkeep
+!/uploads/profiles/.htaccess
+!/uploads/profiles/web.config
+!/uploads/profiles/index.html
+
+# Berkas lokal/editor
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+/.idea/
+/.vscode/

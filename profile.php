@@ -5,6 +5,7 @@ require_login();
 $pdo = db();
 $userId = current_user_id();
 $errors = [];
+$action = '';
 
 function delete_profile_photo_file(?string $relativePath): void
 {
@@ -50,7 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = $pdo->prepare('UPDATE users SET name=?, email=? WHERE id=?');
                 $stmt->execute([$name, $email, $userId]);
                 $_SESSION['user_name'] = $name;
-                flash('success', 'Nama dan email profil berhasil diperbarui.');
+                auto_backup_after_financial_change($pdo, $userId, 'profil-diperbarui');
+                flash('success', 'Nama dan email profil berhasil diperbarui. Snapshot baru dibuat agar backup mengikuti email terbaru.');
                 redirect('profile.php');
             }
         }
@@ -84,25 +86,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'photo') {
-            $upload = $_FILES['profile_photo'] ?? null;
-            if (!$upload || !isset($upload['error']) || $upload['error'] === UPLOAD_ERR_NO_FILE) {
-                $errors[] = 'Pilih gambar profil terlebih dahulu.';
+            $croppedPayload = trim((string)($_POST['profile_photo_cropped'] ?? ''));
+            $upload = $_FILES['profile_photo_source'] ?? null;
+            $imageBinary = null;
+            $imageTmpName = '';
+            $imageSize = 0;
+
+            if ($croppedPayload !== '') {
+                if (!preg_match('#^data:image/(?:jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\r\n]+)$#', $croppedPayload, $matches)) {
+                    $errors[] = 'Data hasil crop tidak valid. Pilih gambar dan ulangi pemotongan.';
+                } else {
+                    $imageBinary = base64_decode(preg_replace('/\s+/', '', $matches[1]), true);
+                    if ($imageBinary === false || $imageBinary === '') {
+                        $errors[] = 'Hasil crop tidak dapat dibaca. Silakan ulangi pemotongan.';
+                        $imageBinary = null;
+                    } else {
+                        $imageSize = strlen($imageBinary);
+                    }
+                }
+            } elseif (!$upload || !isset($upload['error']) || $upload['error'] === UPLOAD_ERR_NO_FILE) {
+                $errors[] = 'Pilih gambar dan tentukan area crop 1:1 terlebih dahulu.';
             } elseif ($upload['error'] !== UPLOAD_ERR_OK) {
                 $errors[] = 'Gagal mengunggah gambar. Silakan coba lagi.';
-            } elseif ((int)$upload['size'] > 2 * 1024 * 1024) {
-                $errors[] = 'Ukuran gambar maksimal 2 MB.';
+            } else {
+                $imageTmpName = (string)($upload['tmp_name'] ?? '');
+                $imageSize = (int)($upload['size'] ?? 0);
+            }
+
+            if (!$errors && ($imageSize <= 0 || $imageSize > 2 * 1024 * 1024)) {
+                $errors[] = 'Ukuran hasil foto maksimal 2 MB.';
             }
 
             $extension = '';
             if (!$errors) {
-                if (class_exists('finfo')) {
-                    $finfo = new finfo(FILEINFO_MIME_TYPE);
-                    $mime = (string)$finfo->file((string)$upload['tmp_name']);
+                if ($imageBinary !== null) {
+                    if (class_exists('finfo')) {
+                        $finfo = new finfo(FILEINFO_MIME_TYPE);
+                        $mime = (string)$finfo->buffer($imageBinary);
+                    } else {
+                        $mime = '';
+                    }
+                    $dimensions = @getimagesizefromstring($imageBinary);
+                    if ($mime === '' && is_array($dimensions)) {
+                        $mime = (string)($dimensions['mime'] ?? '');
+                    }
                 } else {
-                    $mime = function_exists('mime_content_type')
-                        ? (string)mime_content_type((string)$upload['tmp_name'])
-                        : '';
+                    if (class_exists('finfo')) {
+                        $finfo = new finfo(FILEINFO_MIME_TYPE);
+                        $mime = (string)$finfo->file($imageTmpName);
+                    } else {
+                        $mime = function_exists('mime_content_type')
+                            ? (string)mime_content_type($imageTmpName)
+                            : '';
+                    }
+                    $dimensions = @getimagesize($imageTmpName);
                 }
+
                 $allowed = [
                     'image/jpeg' => 'jpg',
                     'image/png' => 'png',
@@ -114,11 +153,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $extension = $allowed[$mime];
                 }
 
-                $dimensions = @getimagesize((string)$upload['tmp_name']);
                 if (!$dimensions || $dimensions[0] < 80 || $dimensions[1] < 80) {
                     $errors[] = 'Resolusi gambar minimal 80 × 80 piksel.';
                 } elseif ($dimensions[0] > 5000 || $dimensions[1] > 5000) {
                     $errors[] = 'Resolusi gambar terlalu besar. Maksimal 5000 × 5000 piksel.';
+                } elseif ((int)$dimensions[0] !== (int)$dimensions[1]) {
+                    $errors[] = 'Foto profil harus dipotong dengan rasio 1:1. Pilih gambar lalu tentukan area potong terlebih dahulu.';
                 }
             }
 
@@ -135,8 +175,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $relativePath = 'uploads/profiles/' . $filename;
                 $destination = $uploadDirectory . '/' . $filename;
 
-                if (!move_uploaded_file((string)$upload['tmp_name'], $destination)) {
-                    throw new RuntimeException('Gambar gagal disimpan pada server.');
+                $saved = $imageBinary !== null
+                    ? file_put_contents($destination, $imageBinary, LOCK_EX) !== false
+                    : move_uploaded_file($imageTmpName, $destination);
+
+                if (!$saved) {
+                    throw new RuntimeException('Gambar hasil crop gagal disimpan pada server.');
                 }
 
                 $user = current_user_record($pdo);
@@ -149,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 delete_profile_photo_file($user['profile_photo'] ?? null);
 
-                flash('success', 'Foto profil berhasil diperbarui.');
+                flash('success', 'Foto profil 1:1 berhasil diperbarui.');
                 redirect('profile.php');
             }
         }
@@ -163,50 +207,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('profile.php');
         }
 
-
-        if ($action === 'clean_data') {
-            $currentPassword = (string)($_POST['clean_password'] ?? '');
-            $confirmation = trim((string)($_POST['clean_confirmation'] ?? ''));
-            $acknowledged = isset($_POST['clean_acknowledge']);
-            $user = current_user_record($pdo);
-
-            if (!password_verify($currentPassword, (string)($user['password'] ?? ''))) {
-                $errors[] = 'Pembersihan data dibatalkan karena kata sandi tidak sesuai.';
-            }
-            if ($confirmation !== 'BERSIHKAN DATA') {
-                $errors[] = 'Ketik BERSIHKAN DATA secara tepat untuk melanjutkan.';
-            }
-            if (!$acknowledged) {
-                $errors[] = 'Anda harus menyetujui bahwa data keuangan akan dihapus permanen.';
-            }
-
-            if (!$errors) {
-                $pdo->beginTransaction();
-
-                $stmt = $pdo->prepare('DELETE FROM savings_entries WHERE user_id=?');
-                $stmt->execute([$userId]);
-                $stmt = $pdo->prepare('DELETE FROM savings_goals WHERE user_id=?');
-                $stmt->execute([$userId]);
-                $stmt = $pdo->prepare('DELETE FROM transactions WHERE user_id=?');
-                $stmt->execute([$userId]);
-                $stmt = $pdo->prepare('DELETE FROM categories WHERE user_id=?');
-                $stmt->execute([$userId]);
-
-                $defaults = [
-                    ['Gaji', 'income'], ['Bonus', 'income'], ['Penjualan', 'income'], ['Lainnya', 'income'],
-                    ['Makan', 'expense'], ['Transport', 'expense'], ['Belanja', 'expense'], ['Tagihan', 'expense'],
-                    ['Hiburan', 'expense'], ['Kesehatan', 'expense'], ['Lainnya', 'expense'],
-                ];
-                $categoryInsert = $pdo->prepare('INSERT INTO categories (user_id, name, type, is_active) VALUES (?, ?, ?, 1)');
-                foreach ($defaults as [$categoryName, $categoryType]) {
-                    $categoryInsert->execute([$userId, $categoryName, $categoryType]);
-                }
-
-                $pdo->commit();
-                flash('success', 'Semua data keuangan berhasil dibersihkan. Akun, profil, foto, email, dan kata sandi tetap dipertahankan.');
-                redirect('profile.php#data-management');
-            }
-        }
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -218,18 +218,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $user = current_user_record($pdo);
-$dataCountStmt = $pdo->prepare("SELECT
-    (SELECT COUNT(*) FROM transactions WHERE user_id=?) AS transaction_count,
-    (SELECT COUNT(*) FROM savings_goals WHERE user_id=?) AS goal_count,
-    (SELECT COUNT(*) FROM savings_entries WHERE user_id=?) AS saving_entry_count,
-    (SELECT COUNT(*) FROM categories WHERE user_id=?) AS category_count");
-$dataCountStmt->execute([$userId, $userId, $userId, $userId]);
-$dataCounts = $dataCountStmt->fetch() ?: [
-    'transaction_count' => 0,
-    'goal_count' => 0,
-    'saving_entry_count' => 0,
-    'category_count' => 0,
-];
 $pageTitle = 'Profil';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -239,7 +227,7 @@ require __DIR__ . '/includes/header.php';
         <h1>Profil</h1>
         <p class="muted">Kelola identitas akun, foto profil, email, dan kata sandi.</p>
     </div>
-    <a class="btn secondary annual-shortcut" href="annual.php">Lihat rekapan tahunan</a>
+    <a class="btn secondary annual-shortcut" href="annual.php">Lihat laporan tahunan</a>
 </div>
 
 <?php if ($errors): ?>
@@ -248,21 +236,31 @@ require __DIR__ . '/includes/header.php';
 
 <div class="profile-layout">
     <aside class="card profile-identity-card">
-        <div class="profile-photo-large">
-            <?= render_user_avatar($user, 'profile-avatar-large', '160') ?>
+        <div class="profile-identity-summary">
+            <div class="profile-photo-large">
+                <?= render_user_avatar($user, 'profile-avatar-large', '160') ?>
+            </div>
+            <div class="profile-identity-copy">
+                <h2><?= e($user['name'] ?? 'Pengguna') ?></h2>
+                <p class="muted"><?= e($user['email'] ?? '') ?></p>
+                <span class="profile-member-since">Bergabung <?= e(format_month_id((string)($user['created_at'] ?? ''))) ?></span>
+            </div>
         </div>
-        <h2><?= e($user['name'] ?? 'Pengguna') ?></h2>
-        <p class="muted"><?= e($user['email'] ?? '') ?></p>
-        <span class="profile-member-since">Bergabung <?= e(format_month_id((string)($user['created_at'] ?? ''))) ?></span>
 
-        <form method="post" enctype="multipart/form-data" class="profile-photo-form">
+        <form method="post" enctype="multipart/form-data" class="profile-photo-form" data-profile-photo-form>
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="photo">
+            <input type="hidden" name="profile_photo_cropped" value="" data-profile-photo-cropped>
             <label class="profile-file-label">Ganti foto profil
-                <input type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp" required>
+                <input type="file" id="profilePhotoInput" name="profile_photo_source" accept="image/jpeg,image/png,image/webp" data-profile-photo-input>
             </label>
-            <small>JPG, PNG, atau WebP. Maksimal 2 MB.</small>
-            <button class="btn primary full" type="submit">Unggah foto</button>
+            <small>Pilih JPG, PNG, atau WebP. Area foto akan dipotong dengan rasio 1:1 sebelum diunggah.</small>
+            <div class="profile-crop-error" data-profile-crop-error hidden role="alert"></div>
+            <div class="profile-crop-ready" data-profile-crop-ready hidden role="status">
+                <span aria-hidden="true">✓</span>
+                <span>Potongan 1:1 sudah siap diunggah.</span>
+            </div>
+            <button class="btn primary full" type="submit" data-profile-photo-submit disabled>Unggah foto</button>
         </form>
 
         <?php if (profile_photo_url($user['profile_photo'] ?? null) !== null): ?>
@@ -329,92 +327,33 @@ require __DIR__ . '/includes/header.php';
             </form>
         </section>
 
-        <section class="card profile-form-card data-management-card" id="data-management">
-            <div class="section-head compact">
-                <div>
-                    <span class="section-kicker">Data dan privasi</span>
-                    <h2>Backup, pulihkan, dan bersihkan data</h2>
-                    <p class="muted">Unduh atau pulihkan backup langsung dari browser. Fitur ini dapat digunakan melalui desktop, Android, iPhone, dan iPad tanpa membuka phpMyAdmin.</p>
-                </div>
-            </div>
-
-            <div class="data-count-grid" aria-label="Jumlah data akun">
-                <div><strong><?= (int)$dataCounts['transaction_count'] ?></strong><span>Transaksi</span></div>
-                <div><strong><?= (int)$dataCounts['goal_count'] ?></strong><span>Tujuan</span></div>
-                <div><strong><?= (int)$dataCounts['saving_entry_count'] ?></strong><span>Aktivitas tabungan</span></div>
-                <div><strong><?= (int)$dataCounts['category_count'] ?></strong><span>Kategori</span></div>
-            </div>
-
-            <div class="data-action-grid">
-                <article class="data-action-panel backup-panel">
-                    <div class="data-action-head">
-                        <span class="data-action-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="23" height="23"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </span>
-                        <div><h3>Ekspor backup SQL</h3><p>Simpan transaksi, kategori, tujuan, dan aktivitas tabungan dalam satu berkas <code>.sql</code>.</p></div>
-                    </div>
-                    <form method="post" action="exports/data_sql.php" class="data-action-form">
-                        <?= csrf_field() ?>
-                        <label>Kata sandi saat ini
-                            <input type="password" name="current_password" autocomplete="current-password" required>
-                        </label>
-                        <button class="btn backup full" type="submit">Unduh backup SQL</button>
-                    </form>
-                    <small>Backup format baru tetap dapat diimpor secara manual, tetapi pemulihan melalui web lebih aman karena SQL unggahan tidak dieksekusi secara langsung.</small>
-                </article>
-
-                <article class="data-action-panel import-panel">
-                    <div class="data-action-head">
-                        <span class="data-action-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="23" height="23"><path d="M12 20V9m0 0-4 4m4-4 4 4M5 5h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </span>
-                        <div><h3>Impor backup SQL</h3><p>Pulihkan berkas <code>.sql</code> hasil ekspor SadarBudget langsung ke akun ini.</p></div>
-                    </div>
-                    <form method="post" action="imports/data_sql.php" enctype="multipart/form-data" class="data-action-form" onsubmit="return confirm('Data keuangan saat ini akan diganti oleh isi backup. Lanjutkan impor?');">
-                        <?= csrf_field() ?>
-                        <label>Berkas backup SQL
-                            <input type="file" name="backup_sql" accept=".sql,text/plain,application/sql" required>
-                        </label>
-                        <label>Kata sandi saat ini
-                            <input type="password" name="current_password" autocomplete="current-password" required>
-                        </label>
-                        <label>Ketik <strong>IMPOR DATA</strong>
-                            <input type="text" name="import_confirmation" autocomplete="off" required>
-                        </label>
-                        <label class="import-confirmation-check">
-                            <input type="checkbox" name="import_acknowledge" value="1" required>
-                            <span>Saya memahami bahwa transaksi, kategori, dan tabungan saat ini akan diganti oleh data dari backup.</span>
-                        </label>
-                        <button class="btn import-data full" type="submit">Impor dan pulihkan data</button>
-                    </form>
-                    <small>Mendukung backup SadarBudget. Email di dalam backup harus sama dengan email akun yang sedang login. Maksimal 10 MB.</small>
-                </article>
-
-                <article class="data-action-panel clean-panel">
-                    <div class="data-action-head">
-                        <span class="data-action-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="23" height="23"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                        </span>
-                        <div><h3>Bersihkan data keuangan</h3><p>Hapus seluruh transaksi, tabungan, dan kategori. Akun serta profil tidak ikut dihapus.</p></div>
-                    </div>
-                    <form method="post" class="data-action-form" onsubmit="return confirm('Semua data keuangan akan dihapus permanen. Lanjutkan?');">
-                        <?= csrf_field() ?>
-                        <input type="hidden" name="action" value="clean_data">
-                        <label>Kata sandi saat ini
-                            <input type="password" name="clean_password" autocomplete="current-password" required>
-                        </label>
-                        <label>Ketik <strong>BERSIHKAN DATA</strong>
-                            <input type="text" name="clean_confirmation" autocomplete="off" required>
-                        </label>
-                        <label class="clean-confirmation-check">
-                            <input type="checkbox" name="clean_acknowledge" value="1" required>
-                            <span>Saya memahami bahwa data yang belum dibackup tidak dapat dipulihkan.</span>
-                        </label>
-                        <button class="btn danger full" type="submit">Bersihkan semua data keuangan</button>
-                    </form>
-                </article>
-            </div>
-        </section>
     </div>
+</div>
+
+<div class="photo-crop-modal" data-photo-crop-modal hidden>
+    <section class="photo-crop-card" role="dialog" aria-modal="true" aria-labelledby="photoCropTitle" aria-describedby="photoCropDescription" tabindex="-1">
+        <header class="photo-crop-header">
+            <div>
+                <span class="section-kicker">Foto profil</span>
+                <h2 id="photoCropTitle">Tentukan area foto</h2>
+                <p id="photoCropDescription" class="muted">Geser gambar dan atur pembesaran. Area di dalam kotak akan disimpan dengan rasio 1:1.</p>
+            </div>
+            <button class="photo-crop-close" type="button" data-photo-crop-cancel aria-label="Batalkan pemotongan">&times;</button>
+        </header>
+        <div class="photo-crop-body">
+            <div class="photo-crop-stage" data-photo-crop-stage>
+                <img alt="Pratinjau foto yang akan dipotong" data-photo-crop-image draggable="false">
+                <span class="photo-crop-grid" aria-hidden="true"></span>
+            </div>
+            <label class="photo-crop-zoom">Pembesaran
+                <input type="range" min="1" max="3" step="0.01" value="1" data-photo-crop-zoom>
+            </label>
+            <p class="photo-crop-help">Tarik gambar untuk mengubah posisi. Hasil akhir disimpan sebagai foto persegi 512 × 512 piksel.</p>
+        </div>
+        <footer class="photo-crop-actions">
+            <button class="btn secondary" type="button" data-photo-crop-cancel>Batal</button>
+            <button class="btn primary" type="button" data-photo-crop-apply>Gunakan potongan</button>
+        </footer>
+    </section>
 </div>
 <?php require __DIR__ . '/includes/footer.php'; ?>
