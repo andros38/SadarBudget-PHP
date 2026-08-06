@@ -107,7 +107,8 @@
 
   function initNavigation() {
     const toggle = document.querySelector('.nav-toggle');
-    const nav = document.getElementById('primary-navigation');
+    const navId = toggle ? (toggle.getAttribute('aria-controls') || 'primary-navigation') : 'primary-navigation';
+    const nav = document.getElementById(navId);
     if (!toggle || !nav) return;
 
     toggle.addEventListener('click', function () {
@@ -524,193 +525,6 @@
     else if (typeof media.addListener === 'function') media.addListener(sync);
   }
 
-  function initGoalActionAccordions() {
-    document.querySelectorAll('.goal-action-grid').forEach(function (grid) {
-      const panels = Array.from(grid.querySelectorAll(':scope > details'));
-      panels.forEach(function (panel) {
-        panel.addEventListener('toggle', function () {
-          if (!panel.open) return;
-          panels.forEach(function (other) {
-            if (other !== panel) other.open = false;
-          });
-        });
-      });
-    });
-  }
-
-
-  function initGoalModals() {
-    const modals = Array.from(document.querySelectorAll('[data-goal-modal]'));
-    if (!modals.length) return;
-
-    const openTriggers = Array.from(document.querySelectorAll('[data-goal-modal-open]'));
-    let activeModal = null;
-    let previousFocus = null;
-    let closeTimer = null;
-
-    function focusableElements(modal) {
-      return Array.from(modal.querySelectorAll(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter(function (element) {
-        return !element.hidden && element.offsetParent !== null;
-      });
-    }
-
-    function activateTab(modal, tabName, focusTab) {
-      const tabs = Array.from(modal.querySelectorAll('[data-goal-tab]'));
-      const panels = Array.from(modal.querySelectorAll('[data-goal-panel]'));
-      if (!tabs.length || !panels.length) return;
-
-      const availableNames = tabs.map(function (tab) {
-        return tab.getAttribute('data-goal-tab');
-      });
-      const selectedName = availableNames.indexOf(tabName) >= 0
-        ? tabName
-        : availableNames[0];
-
-      tabs.forEach(function (tab) {
-        const isActive = tab.getAttribute('data-goal-tab') === selectedName;
-        tab.classList.toggle('is-active', isActive);
-        tab.setAttribute('aria-selected', String(isActive));
-        tab.setAttribute('tabindex', isActive ? '0' : '-1');
-        if (isActive && focusTab) tab.focus();
-      });
-
-      panels.forEach(function (panel) {
-        const isActive = panel.getAttribute('data-goal-panel') === selectedName;
-        panel.hidden = !isActive;
-        panel.classList.toggle('is-active', isActive);
-      });
-
-      modal.setAttribute('data-active-goal-tab', selectedName);
-    }
-
-    function closeModal(options) {
-      if (!activeModal) return;
-      const settings = Object.assign({ restoreFocus: true, immediate: false }, options || {});
-      const modalToClose = activeModal;
-      activeModal = null;
-      window.clearTimeout(closeTimer);
-      modalToClose.classList.remove('is-visible');
-      document.body.classList.remove('goal-modal-open');
-
-      const finish = function () {
-        modalToClose.hidden = true;
-        if (settings.restoreFocus && previousFocus && typeof previousFocus.focus === 'function') {
-          previousFocus.focus();
-        }
-        previousFocus = null;
-      };
-
-      if (settings.immediate) finish();
-      else closeTimer = window.setTimeout(finish, 180);
-    }
-
-    function openModal(modal, requestedTab, trigger) {
-      if (!modal) return;
-      if (activeModal && activeModal !== modal) {
-        closeModal({ restoreFocus: false, immediate: true });
-      }
-
-      window.clearTimeout(closeTimer);
-      previousFocus = trigger || document.activeElement;
-      activeModal = modal;
-      modal.hidden = false;
-      document.body.classList.add('goal-modal-open');
-
-      const defaultTab = requestedTab
-        || modal.getAttribute('data-goal-default-tab')
-        || 'overview';
-      activateTab(modal, defaultTab, false);
-
-      window.requestAnimationFrame(function () {
-        modal.classList.add('is-visible');
-        const dialog = modal.querySelector('[role="dialog"]');
-        if (dialog) dialog.focus();
-      });
-    }
-
-    openTriggers.forEach(function (trigger) {
-      trigger.addEventListener('click', function () {
-        const modalId = trigger.getAttribute('data-goal-modal-open');
-        const modal = document.getElementById(modalId);
-        const requestedTab = trigger.getAttribute('data-goal-tab-target') || '';
-        openModal(modal, requestedTab, trigger);
-      });
-    });
-
-    modals.forEach(function (modal) {
-      modal.querySelectorAll('[data-goal-modal-close]').forEach(function (button) {
-        button.addEventListener('click', function () { closeModal(); });
-      });
-
-      modal.querySelectorAll('[data-goal-tab]').forEach(function (tab) {
-        tab.addEventListener('click', function () {
-          activateTab(modal, tab.getAttribute('data-goal-tab') || 'overview', false);
-        });
-
-        tab.addEventListener('keydown', function (event) {
-          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-          const tabs = Array.from(modal.querySelectorAll('[data-goal-tab]'));
-          const currentIndex = tabs.indexOf(tab);
-          if (currentIndex < 0) return;
-          event.preventDefault();
-          const direction = event.key === 'ArrowRight' ? 1 : -1;
-          const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
-          const nextTab = tabs[nextIndex];
-          activateTab(modal, nextTab.getAttribute('data-goal-tab') || 'overview', true);
-        });
-      });
-
-      modal.querySelectorAll('[data-goal-tab-target]:not([data-goal-modal-open])').forEach(function (button) {
-        button.addEventListener('click', function () {
-          activateTab(modal, button.getAttribute('data-goal-tab-target') || 'overview', true);
-        });
-      });
-
-      modal.addEventListener('click', function (event) {
-        if (event.target === modal) closeModal();
-      });
-    });
-
-    document.addEventListener('keydown', function (event) {
-      if (!activeModal) return;
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeModal();
-        return;
-      }
-
-      if (event.key !== 'Tab') return;
-      const focusable = focusableElements(activeModal);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      const dialog = activeModal.querySelector('[role="dialog"]');
-      const activeElement = document.activeElement;
-
-      if (event.shiftKey && (activeElement === first || activeElement === dialog)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (activeElement === last || activeElement === dialog)) {
-        event.preventDefault();
-        first.focus();
-      }
-    });
-
-    const autoOpenModal = modals.find(function (modal) {
-      return modal.getAttribute('data-goal-modal-auto-open') === 'true';
-    });
-    if (autoOpenModal) {
-      window.setTimeout(function () {
-        openModal(autoOpenModal, autoOpenModal.getAttribute('data-goal-default-tab') || '', null);
-      }, 0);
-    }
-  }
-
-
   function initAnnualChart() {
     const canvas = document.getElementById('annualChart');
     if (!canvas || !Array.isArray(window.annualChartData)) return;
@@ -802,6 +616,425 @@
     window.addEventListener('sadarbudget:themechange', draw);
   }
 
+  function initInlineFormValidation() {
+    const forms = Array.from(document.querySelectorAll('[data-inline-validation]'));
+    if (!forms.length) return;
+
+    function errorElement(input) {
+      const targetId = input.getAttribute('data-error-target');
+      return targetId ? document.getElementById(targetId) : null;
+    }
+
+    function confirmationContainer(input) {
+      return input.closest('.import-confirmation-check, .clean-confirmation-check, .auto-backup-confirmation');
+    }
+
+    function showError(input, message) {
+      const feedback = errorElement(input);
+      input.setAttribute('aria-invalid', 'true');
+      const container = confirmationContainer(input);
+      if (container) container.classList.add('has-error');
+      if (feedback) {
+        feedback.textContent = message;
+        feedback.hidden = false;
+      }
+    }
+
+    function clearError(input) {
+      input.removeAttribute('aria-invalid');
+      const container = confirmationContainer(input);
+      if (container) container.classList.remove('has-error');
+      const feedback = errorElement(input);
+      if (feedback) {
+        feedback.textContent = '';
+        feedback.hidden = true;
+      }
+    }
+
+    function isEmpty(input) {
+      if (input.type === 'checkbox') return !input.checked;
+      if (input.type === 'file') return !input.files || input.files.length === 0;
+      return String(input.value || '').trim() === '';
+    }
+
+    forms.forEach(function (form) {
+      const inputs = Array.from(form.querySelectorAll('[data-required-message], [data-exact-value]'));
+
+      inputs.forEach(function (input) {
+        const eventName = input.type === 'checkbox' || input.type === 'file' || input.tagName === 'SELECT'
+          ? 'change'
+          : 'input';
+        input.addEventListener(eventName, function () {
+          clearError(input);
+        });
+      });
+
+      form.addEventListener('submit', function (event) {
+        let firstInvalid = null;
+
+        inputs.forEach(function (input) {
+          clearError(input);
+
+          const requiredMessage = input.getAttribute('data-required-message');
+          const exactValue = input.getAttribute('data-exact-value');
+          let message = '';
+
+          if (requiredMessage && isEmpty(input)) {
+            message = requiredMessage;
+          } else if (exactValue !== null && String(input.value || '').trim() !== exactValue) {
+            message = input.getAttribute('data-exact-message') || ('Tulisan harus sama persis: ' + exactValue + '.');
+          }
+
+          if (message !== '') {
+            showError(input, message);
+            if (!firstInvalid) firstInvalid = input;
+          }
+        });
+
+        if (firstInvalid) {
+          event.preventDefault();
+          firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          window.setTimeout(function () { firstInvalid.focus(); }, 180);
+          return;
+        }
+
+        const confirmationMessage = form.getAttribute('data-confirm-message');
+        if (confirmationMessage && !window.confirm(confirmationMessage)) {
+          event.preventDefault();
+        }
+      });
+    });
+
+    const serverInvalid = document.querySelector('[data-inline-validation] [aria-invalid="true"]');
+    if (serverInvalid) {
+      window.requestAnimationFrame(function () {
+        serverInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(function () { serverInvalid.focus(); }, 220);
+      });
+    }
+  }
+
+  function initProfilePhotoCrop() {
+    const form = document.querySelector('[data-profile-photo-form]');
+    const input = document.querySelector('[data-profile-photo-input]');
+    const croppedField = document.querySelector('[data-profile-photo-cropped]');
+    const submitButton = document.querySelector('[data-profile-photo-submit]');
+    const readyNotice = document.querySelector('[data-profile-crop-ready]');
+    const errorNotice = document.querySelector('[data-profile-crop-error]');
+    const modal = document.querySelector('[data-photo-crop-modal]');
+    const card = modal ? modal.querySelector('.photo-crop-card') : null;
+    const stage = modal ? modal.querySelector('[data-photo-crop-stage]') : null;
+    const image = modal ? modal.querySelector('[data-photo-crop-image]') : null;
+    const zoomInput = modal ? modal.querySelector('[data-photo-crop-zoom]') : null;
+    const applyButton = modal ? modal.querySelector('[data-photo-crop-apply]') : null;
+    const cancelButtons = modal ? Array.from(modal.querySelectorAll('[data-photo-crop-cancel]')) : [];
+
+    if (!form || !input || !croppedField || !submitButton || !modal || !card || !stage || !image || !zoomInput || !applyButton) {
+      return;
+    }
+
+    let objectUrl = '';
+    let naturalWidth = 0;
+    let naturalHeight = 0;
+    let minimumScale = 1;
+    let scale = 1;
+    let offsetX = 0;
+    let offsetY = 0;
+    let dragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragOriginX = 0;
+    let dragOriginY = 0;
+    let previousFocus = null;
+
+    function showError(message) {
+      if (!errorNotice) return;
+      errorNotice.textContent = message;
+      errorNotice.hidden = false;
+    }
+
+    function clearError() {
+      if (!errorNotice) return;
+      errorNotice.textContent = '';
+      errorNotice.hidden = true;
+    }
+
+    function setReady(isReady) {
+      submitButton.disabled = !isReady;
+      if (readyNotice) readyNotice.hidden = !isReady;
+    }
+
+    function revokeObjectUrl() {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = '';
+      }
+    }
+
+    function stageSize() {
+      const rect = stage.getBoundingClientRect();
+      return Math.max(1, Math.min(rect.width, rect.height));
+    }
+
+    function clampOffsets() {
+      const size = stageSize();
+      const scaledWidth = naturalWidth * scale;
+      const scaledHeight = naturalHeight * scale;
+      const minimumX = Math.min(0, size - scaledWidth);
+      const minimumY = Math.min(0, size - scaledHeight);
+
+      offsetX = Math.min(0, Math.max(minimumX, offsetX));
+      offsetY = Math.min(0, Math.max(minimumY, offsetY));
+    }
+
+    function renderImage() {
+      clampOffsets();
+      image.style.width = naturalWidth + 'px';
+      image.style.height = naturalHeight + 'px';
+      image.style.left = offsetX + 'px';
+      image.style.top = offsetY + 'px';
+      image.style.transform = 'scale(' + scale + ')';
+    }
+
+    function resetCropPosition() {
+      const size = stageSize();
+      minimumScale = Math.max(size / naturalWidth, size / naturalHeight);
+      scale = minimumScale;
+      zoomInput.value = '1';
+      offsetX = (size - naturalWidth * scale) / 2;
+      offsetY = (size - naturalHeight * scale) / 2;
+      renderImage();
+    }
+
+    function closeModal(options) {
+      const settings = Object.assign({ clearSelection: false, restoreFocus: true }, options || {});
+      modal.classList.remove('is-visible');
+      document.body.classList.remove('photo-crop-open');
+
+      window.setTimeout(function () {
+        modal.hidden = true;
+        if (settings.clearSelection) {
+          input.value = '';
+          croppedField.value = '';
+          setReady(false);
+          revokeObjectUrl();
+        }
+        if (settings.restoreFocus && previousFocus && typeof previousFocus.focus === 'function') {
+          previousFocus.focus();
+        }
+      }, 170);
+    }
+
+    function openModal() {
+      previousFocus = document.activeElement;
+      modal.hidden = false;
+      document.body.classList.add('photo-crop-open');
+      window.requestAnimationFrame(function () {
+        modal.classList.add('is-visible');
+        resetCropPosition();
+        card.focus();
+      });
+    }
+
+    function loadSelectedFile(file) {
+      clearError();
+      croppedField.value = '';
+      setReady(false);
+
+      if (!file) return;
+      if (!/^image\/(jpeg|png|webp)$/i.test(file.type || '')) {
+        input.value = '';
+        showError('Format gambar harus JPG, PNG, atau WebP.');
+        return;
+      }
+      if (file.size > 12 * 1024 * 1024) {
+        input.value = '';
+        showError('Ukuran gambar sumber maksimal 12 MB.');
+        return;
+      }
+
+      revokeObjectUrl();
+      objectUrl = URL.createObjectURL(file);
+      image.onload = function () {
+        naturalWidth = image.naturalWidth;
+        naturalHeight = image.naturalHeight;
+        if (naturalWidth < 80 || naturalHeight < 80) {
+          input.value = '';
+          revokeObjectUrl();
+          showError('Resolusi gambar minimal 80 × 80 piksel.');
+          return;
+        }
+        openModal();
+      };
+      image.onerror = function () {
+        input.value = '';
+        revokeObjectUrl();
+        showError('Gambar tidak dapat dibaca oleh browser.');
+      };
+      image.src = objectUrl;
+    }
+
+    input.addEventListener('change', function () {
+      loadSelectedFile(input.files && input.files[0] ? input.files[0] : null);
+    });
+
+    zoomInput.addEventListener('input', function () {
+      if (!naturalWidth || !naturalHeight) return;
+      const size = stageSize();
+      const oldScale = scale;
+      const centerImageX = (size / 2 - offsetX) / oldScale;
+      const centerImageY = (size / 2 - offsetY) / oldScale;
+      scale = minimumScale * Number(zoomInput.value || 1);
+      offsetX = size / 2 - centerImageX * scale;
+      offsetY = size / 2 - centerImageY * scale;
+      renderImage();
+    });
+
+    stage.addEventListener('pointerdown', function (event) {
+      if (!naturalWidth || !naturalHeight) return;
+      dragging = true;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      dragOriginX = offsetX;
+      dragOriginY = offsetY;
+      stage.classList.add('is-dragging');
+      stage.setPointerCapture(event.pointerId);
+    });
+
+    stage.addEventListener('pointermove', function (event) {
+      if (!dragging) return;
+      offsetX = dragOriginX + (event.clientX - dragStartX);
+      offsetY = dragOriginY + (event.clientY - dragStartY);
+      renderImage();
+    });
+
+    function finishDrag(event) {
+      if (!dragging) return;
+      dragging = false;
+      stage.classList.remove('is-dragging');
+      if (event && stage.hasPointerCapture(event.pointerId)) {
+        stage.releasePointerCapture(event.pointerId);
+      }
+    }
+
+    stage.addEventListener('pointerup', finishDrag);
+    stage.addEventListener('pointercancel', finishDrag);
+
+    applyButton.addEventListener('click', function () {
+      if (!naturalWidth || !naturalHeight) return;
+      const size = stageSize();
+      const sourceX = Math.max(0, -offsetX / scale);
+      const sourceY = Math.max(0, -offsetY / scale);
+      const sourceSize = Math.min(naturalWidth - sourceX, naturalHeight - sourceY, size / scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+
+      if (!context) {
+        showError('Browser tidak dapat memproses crop gambar.');
+        closeModal({ clearSelection: true });
+        return;
+      }
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, 512, 512);
+      croppedField.value = canvas.toDataURL('image/jpeg', 0.9);
+      input.value = '';
+      setReady(true);
+      clearError();
+      closeModal({ clearSelection: false });
+    });
+
+    cancelButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        closeModal({ clearSelection: true });
+      });
+    });
+
+    modal.addEventListener('click', function (event) {
+      if (event.target === modal) closeModal({ clearSelection: true });
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !modal.hidden) {
+        closeModal({ clearSelection: true });
+      }
+    });
+
+    window.addEventListener('resize', function () {
+      if (!modal.hidden && naturalWidth && naturalHeight) resetCropPosition();
+    });
+
+    form.addEventListener('submit', function (event) {
+      if (!croppedField.value) {
+        event.preventDefault();
+        showError('Pilih gambar lalu gunakan potongan 1:1 sebelum mengunggah.');
+        input.focus();
+      }
+    });
+  }
+
+  function initCompactDataPanels() {
+    const panels = Array.from(document.querySelectorAll('.page-data .data-action-panel, .page-data .auto-backup-panel'));
+    if (!panels.length) return;
+
+    const media = window.matchMedia('(max-width: 700px)');
+
+    panels.forEach(function (panel, index) {
+      const head = panel.querySelector('.data-action-head, .auto-backup-head');
+      if (!head) return;
+
+      const contentId = 'compact-data-panel-' + (index + 1);
+      const collapsibleChildren = Array.from(panel.children).filter(function (child) {
+        return child !== head;
+      });
+
+      collapsibleChildren.forEach(function (child) {
+        child.setAttribute('data-compact-panel-content', '');
+        if (!child.id && collapsibleChildren.length === 1) child.id = contentId;
+      });
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'compact-panel-toggle';
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.innerHTML = '<span data-compact-panel-label>Sembunyikan</span><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m7 9 5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      head.appendChild(toggle);
+
+      function setCollapsed(collapsed) {
+        panel.classList.toggle('is-compact-collapsed', collapsed);
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        const label = toggle.querySelector('[data-compact-panel-label]');
+        if (label) label.textContent = collapsed ? 'Buka' : 'Sembunyikan';
+      }
+
+      function applyViewportState(event) {
+        const isMobile = event.matches;
+        panel.classList.toggle('is-compact-panel', isMobile);
+        if (!isMobile) {
+          setCollapsed(false);
+          return;
+        }
+
+        const hasError = panel.classList.contains('has-form-error') || !!panel.querySelector('[aria-invalid="true"], .form-inline-notice.error, .auto-backup-warning');
+        setCollapsed(!hasError);
+      }
+
+      toggle.addEventListener('click', function () {
+        setCollapsed(!panel.classList.contains('is-compact-collapsed'));
+      });
+
+      applyViewportState(media);
+      if (typeof media.addEventListener === 'function') {
+        media.addEventListener('change', applyViewportState);
+      } else if (typeof media.addListener === 'function') {
+        media.addListener(applyViewportState);
+      }
+    });
+  }
+
   function initDesktopCreateMenu() {
     const menus = Array.from(document.querySelectorAll('[data-desktop-create-menu]'));
     if (!menus.length) return;
@@ -834,12 +1067,13 @@
   initTheme();
   initNavigation();
   initDesktopCreateMenu();
+  initInlineFormValidation();
+  initProfilePhotoCrop();
+  initCompactDataPanels();
   initMobileSheets();
   initLogoutModal();
   initCurrencyInputs();
   initResponsiveDisclosures();
-  initGoalActionAccordions();
-  initGoalModals();
   initBalanceChart();
   initAnnualChart();
 }());
