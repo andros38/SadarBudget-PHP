@@ -17,15 +17,24 @@ $user = current_user_record($pdo);
 $password = (string)($_POST['current_password'] ?? '');
 
 if ($password === '' || !password_verify($password, (string)($user['password'] ?? ''))) {
-    flash('error', 'Ekspor SQL dibatalkan karena kata sandi tidak sesuai.');
-    redirect('../profile.php#data-management');
+    form_feedback_set(
+        'data-management',
+        'export',
+        'Backup belum diunduh. Periksa kata sandi yang dimasukkan.',
+        ['export_password' => 'Kata sandi saat ini tidak sesuai.']
+    );
+    redirect('../data.php');
 }
 
 try {
     $output = build_user_data_sql($pdo, current_user_id());
 } catch (Throwable $error) {
-    flash('error', 'Backup SQL gagal dibuat. Silakan coba kembali.');
-    redirect('../profile.php#data-management');
+    form_feedback_set(
+        'data-management',
+        'export',
+        'Backup SQL gagal dibuat. Silakan coba kembali.'
+    );
+    redirect('../data.php');
 }
 
 $safeDate = date('Y-m-d-His');

@@ -134,6 +134,34 @@ function flash(string $key, ?string $message = null): ?string
     return $value;
 }
 
+
+function form_feedback_set(string $scope, string $form, string $message, array $fields = [], array $old = []): void
+{
+    $_SESSION['form_feedback'][$scope] = [
+        'form' => $form,
+        'message' => $message,
+        'fields' => $fields,
+        'old' => $old,
+    ];
+}
+
+function form_feedback_pull(string $scope): array
+{
+    $feedback = $_SESSION['form_feedback'][$scope] ?? [];
+    unset($_SESSION['form_feedback'][$scope]);
+
+    if (!is_array($feedback)) {
+        return [];
+    }
+
+    return [
+        'form' => (string)($feedback['form'] ?? ''),
+        'message' => (string)($feedback['message'] ?? ''),
+        'fields' => is_array($feedback['fields'] ?? null) ? $feedback['fields'] : [],
+        'old' => is_array($feedback['old'] ?? null) ? $feedback['old'] : [],
+    ];
+}
+
 function format_rupiah(float|int|string $amount): string
 {
     return 'Rp ' . number_format((float)$amount, 0, ',', '.');
@@ -155,17 +183,36 @@ function parse_rupiah_input(mixed $value): float
 
 function format_rupiah_input(mixed $value): string
 {
-    $digits = preg_replace('/[^0-9]/', '', (string)$value);
-    if ($digits === null || $digits === '') {
+    if ($value === null) {
         return '';
     }
 
-    $digits = ltrim($digits, '0');
-    if ($digits === '') {
-        $digits = '0';
+    // Nilai DECIMAL dari MySQL biasanya dikembalikan sebagai string, misalnya
+    // "500000.00". Titik pada nilai tersebut adalah pemisah desimal, bukan
+    // pemisah ribuan. Tanpa penanganan khusus, penghapusan semua karakter
+    // nonangka akan mengubah 500000.00 menjadi 50000000.
+    if (is_int($value) || is_float($value)) {
+        $amount = (float)$value;
+    } else {
+        $raw = trim((string)$value);
+        if ($raw === '') {
+            return '';
+        }
+
+        if (preg_match('/^-?[0-9]+\.[0-9]{1,2}$/', $raw) === 1) {
+            $amount = (float)$raw;
+        } else {
+            // Nilai dari input pengguna memakai titik sebagai pemisah ribuan,
+            // misalnya "1.500.000".
+            $digits = preg_replace('/[^0-9]/', '', $raw);
+            if ($digits === null || $digits === '') {
+                return '';
+            }
+            $amount = (float)$digits;
+        }
     }
 
-    return number_format((float)$digits, 0, ',', '.');
+    return number_format(max(0, $amount), 0, ',', '.');
 }
 
 function limit_text(string $value, int $maxLength = 255): string
@@ -253,7 +300,31 @@ function month_range(string $month): array
 
 function allowed_transaction_types(): array
 {
-    return ['income', 'expense', 'savings_deposit', 'savings_withdrawal', 'savings_spend'];
+    return ['income', 'expense'];
+}
+
+function transaction_history_context(mixed $month, mixed $type, mixed $page): array
+{
+    $validMonth = valid_month(is_string($month) ? $month : null) ? (string)$month : '';
+    $validType = in_array((string)$type, allowed_transaction_types(), true) ? (string)$type : '';
+    $validPage = max(1, (int)$page);
+
+    return [
+        'month' => $validMonth,
+        'type' => $validType,
+        'page' => $validPage,
+    ];
+}
+
+function transaction_history_url(array $context): string
+{
+    $query = array_filter([
+        'month' => $context['month'] ?? '',
+        'type' => $context['type'] ?? '',
+        'page' => max(1, (int)($context['page'] ?? 1)),
+    ], static fn(mixed $value, string $key): bool => $key === 'page' ? (int)$value > 1 : $value !== '', ARRAY_FILTER_USE_BOTH);
+
+    return 'transactions.php' . ($query ? '?' . http_build_query($query) : '');
 }
 
 function transaction_type_label(string $type): string
@@ -261,9 +332,6 @@ function transaction_type_label(string $type): string
     return match ($type) {
         'income' => 'Pemasukan',
         'expense' => 'Pengeluaran',
-        'savings_deposit' => 'Transfer ke tabungan',
-        'savings_withdrawal' => 'Pencairan ke uang tersedia',
-        'savings_spend' => 'Pengeluaran dari tabungan',
         default => ucfirst(str_replace('_', ' ', $type)),
     };
 }
@@ -276,22 +344,6 @@ function transaction_badge_class(string $type): string
 function transaction_amount_class(string $type): string
 {
     return transaction_badge_class($type);
-}
-
-/**
- * Menghasilkan nama tujuan yang selalu layak tampil pada histori.
- * Operator ?? tidak menangani string kosong, sehingga snapshot lama perlu dinormalisasi.
- */
-function savings_goal_history_name(mixed $snapshot, mixed $fallback = null, int $goalId = 0): string
-{
-    foreach ([$snapshot, $fallback] as $candidate) {
-        $name = trim((string)$candidate);
-        if ($name !== '') {
-            return $name;
-        }
-    }
-
-    return $goalId > 0 ? 'Tujuan tabungan #' . $goalId : 'Tujuan tabungan';
 }
 
 function transaction_category_history_name(mixed $snapshot): string
@@ -325,11 +377,11 @@ function normalize_user_facing_money_terms(mixed $value): string
 }
 
 /**
- * Tanda nilai aktivitas. Transfer internal tetap diberi tanda menurut arah aset.
+ * Tanda nominal transaksi utama.
  */
 function transaction_amount_prefix(string $type): string
 {
-    return in_array($type, ['income', 'savings_withdrawal'], true) ? '+' : '-';
+    return $type === 'income' ? '+' : '-';
 }
 
 /**
@@ -338,42 +390,29 @@ function transaction_amount_prefix(string $type): string
 function transaction_cash_effect(string $type, float $amount): float
 {
     return match ($type) {
-        'income', 'savings_withdrawal' => $amount,
-        'expense', 'savings_deposit' => -$amount,
-        'savings_spend' => 0.0,
+        'income' => $amount,
+        'expense' => -$amount,
         default => 0.0,
     };
 }
 
 /**
- * Menghitung perubahan uang yang benar-benar tersedia selama satu periode.
- * Setoran tabungan mengurangi uang tersedia, sedangkan pencairan menambahnya.
- * Penggunaan langsung dari tabungan tidak masuk ke rumus ini karena tidak
- * melewati saldo uang tersedia.
- */
-function calculate_available_money_change(
-    float $income,
-    float $expenseFromAvailableMoney,
-    float $savingsDeposits,
-    float $savingsWithdrawals
-): float {
-    return $income
-        - $expenseFromAvailableMoney
-        - $savingsDeposits
-        + $savingsWithdrawals;
-}
-
-/**
- * Dampak pada total dana tercatat.
+ * Dampak transaksi terhadap saldo transaksi utama.
  */
 function transaction_asset_effect(string $type, float $amount): float
 {
     return match ($type) {
         'income' => $amount,
-        'expense', 'savings_spend' => -$amount,
-        'savings_deposit', 'savings_withdrawal' => 0.0,
+        'expense' => -$amount,
         default => 0.0,
     };
+}
+
+function schema_table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
+    $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
 }
 
 function schema_column_exists(PDO $pdo, string $table, string $column): bool
@@ -384,8 +423,8 @@ function schema_column_exists(PDO $pdo, string $table, string $column): bool
 }
 
 /**
- * Memastikan struktur database utama tersedia dan lengkap.
- * Data pengguna tidak diubah selain pengisian snapshot historis yang kosong.
+ * Memastikan database berasal dari schema SadarBudget 2.0.0 yang lengkap.
+ * Clean installer tidak menjalankan migrasi destruktif atau mengubah data lama.
  */
 function ensure_application_schema(PDO $pdo): void
 {
@@ -394,167 +433,32 @@ function ensure_application_schema(PDO $pdo): void
         return;
     }
 
-    $pdo->exec("CREATE TABLE IF NOT EXISTS savings_goals (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        user_id INT UNSIGNED NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        target_amount DECIMAL(15,2) NOT NULL,
-        description VARCHAR(255) NULL,
-        target_date DATE NULL,
-        status ENUM('active', 'archived', 'deleted') NOT NULL DEFAULT 'active',
-        deleted_at DATETIME NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        CONSTRAINT fk_savings_goals_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_savings_goals_user_status (user_id, status),
-        INDEX idx_savings_goals_target_date (user_id, target_date)
-    ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS savings_entries (
-        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        user_id INT UNSIGNED NOT NULL,
-        savings_goal_id BIGINT UNSIGNED NOT NULL,
-        type ENUM('deposit', 'withdrawal', 'spend') NOT NULL,
-        amount DECIMAL(15,2) NOT NULL,
-        category_id INT UNSIGNED NULL,
-        goal_name_snapshot VARCHAR(100) NOT NULL,
-        category_name_snapshot VARCHAR(100) NULL,
-        note VARCHAR(255) NULL,
-        entry_date DATE NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        CONSTRAINT fk_savings_entries_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        CONSTRAINT fk_savings_entries_goal FOREIGN KEY (savings_goal_id) REFERENCES savings_goals(id) ON DELETE RESTRICT,
-        CONSTRAINT fk_savings_entries_category FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
-        INDEX idx_savings_entries_user_date (user_id, entry_date),
-        INDEX idx_savings_entries_goal_date (savings_goal_id, entry_date),
-        INDEX idx_savings_entries_category (category_id)
-    ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    if (!schema_column_exists($pdo, 'users', 'profile_photo')) {
-        $pdo->exec("ALTER TABLE users ADD COLUMN profile_photo VARCHAR(255) NULL AFTER password");
-    }
-    if (!schema_column_exists($pdo, 'users', 'password_changed_at')) {
-        $pdo->exec("ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL AFTER profile_photo");
-    }
-    if (!schema_column_exists($pdo, 'users', 'updated_at')) {
-        $pdo->exec("ALTER TABLE users ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at");
-    }
-
+    $requiredTables = ['users', 'categories', 'transactions'];
     $requiredColumns = [
         ['users', 'profile_photo'],
         ['users', 'password_changed_at'],
         ['users', 'updated_at'],
         ['categories', 'is_active'],
         ['transactions', 'category_name_snapshot'],
-        ['savings_goals', 'deleted_at'],
-        ['savings_entries', 'goal_name_snapshot'],
-        ['savings_entries', 'category_name_snapshot'],
-        ['savings_entries', 'category_id'],
     ];
 
+    $missing = [];
+    foreach ($requiredTables as $table) {
+        if (!schema_table_exists($pdo, $table)) {
+            $missing[] = 'tabel ' . $table;
+        }
+    }
     foreach ($requiredColumns as [$table, $column]) {
-        if (!schema_column_exists($pdo, $table, $column)) {
-            throw new RuntimeException('Struktur database belum lengkap. Impor schema.sql melalui phpMyAdmin.');
+        if (schema_table_exists($pdo, $table) && !schema_column_exists($pdo, $table, $column)) {
+            $missing[] = 'kolom ' . $table . '.' . $column;
         }
     }
 
-    // Perbaikan idempotent untuk data warisan: hanya mengisi snapshot yang kosong.
-    // Nama historis yang sudah terisi tidak pernah ditimpa.
-    $pdo->exec("UPDATE savings_goals
-        SET name=CONCAT('Tujuan tabungan #', id)
-        WHERE name IS NULL OR TRIM(name)=''");
-
-    $pdo->exec("UPDATE savings_entries se
-        INNER JOIN savings_goals sg
-            ON sg.id=se.savings_goal_id
-           AND sg.user_id=se.user_id
-        SET se.goal_name_snapshot=COALESCE(
-            NULLIF(TRIM(se.goal_name_snapshot), ''),
-            NULLIF(TRIM(sg.name), ''),
-            CONCAT('Tujuan tabungan #', se.savings_goal_id)
-        )
-        WHERE se.goal_name_snapshot IS NULL OR TRIM(se.goal_name_snapshot)=''");
-
-    $pdo->exec("UPDATE savings_entries se
-        LEFT JOIN categories c
-            ON c.id=se.category_id
-           AND c.user_id=se.user_id
-        SET se.category_name_snapshot=COALESCE(
-            NULLIF(TRIM(se.category_name_snapshot), ''),
-            NULLIF(TRIM(c.name), ''),
-            'Tanpa kategori'
-        )
-        WHERE se.type='spend'
-          AND (se.category_name_snapshot IS NULL OR TRIM(se.category_name_snapshot)='')");
+    if ($missing) {
+        throw new RuntimeException(
+            'Struktur database belum lengkap (' . implode(', ', $missing) . '). Jalankan install.php menggunakan database baru.'
+        );
+    }
 
     $ready = true;
-}
-
-function get_financial_position(PDO $pdo, int $userId): array
-{
-    $stmt = $pdo->prepare("SELECT
-        COALESCE((SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END)
-                  FROM transactions WHERE user_id=?), 0) AS transaction_assets,
-        COALESCE((SELECT SUM(CASE WHEN type='spend' THEN amount ELSE 0 END)
-                  FROM savings_entries WHERE user_id=?), 0) AS savings_spent,
-        COALESCE((SELECT SUM(CASE
-                    WHEN type='deposit' THEN amount
-                    WHEN type IN ('withdrawal', 'spend') THEN -amount
-                    ELSE 0 END)
-                  FROM savings_entries WHERE user_id=?), 0) AS savings_balance");
-    $stmt->execute([$userId, $userId, $userId]);
-    $row = $stmt->fetch() ?: ['transaction_assets' => 0, 'savings_spent' => 0, 'savings_balance' => 0];
-
-    $netAssets = (float)$row['transaction_assets'] - (float)$row['savings_spent'];
-    $savingsBalance = max(0.0, (float)$row['savings_balance']);
-
-    return [
-        'net_assets' => $netAssets,
-        'savings_balance' => $savingsBalance,
-        'available_cash' => $netAssets - $savingsBalance,
-    ];
-}
-
-function get_savings_goal_balance(PDO $pdo, int $userId, int $goalId): float
-{
-    $stmt = $pdo->prepare("SELECT COALESCE(SUM(CASE
-            WHEN type='deposit' THEN amount
-            WHEN type IN ('withdrawal', 'spend') THEN -amount
-            ELSE 0 END), 0)
-        FROM savings_entries WHERE user_id=? AND savings_goal_id=?");
-    $stmt->execute([$userId, $goalId]);
-    return max(0.0, (float)$stmt->fetchColumn());
-}
-
-function savings_entry_type_label(string $type): string
-{
-    return match ($type) {
-        'deposit' => 'Setoran',
-        'withdrawal' => 'Pencairan',
-        'spend' => 'Digunakan',
-        default => ucfirst($type),
-    };
-}
-
-function savings_progress(float $current, float $target): float
-{
-    if ($target <= 0) {
-        return 0.0;
-    }
-    return min(100.0, max(0.0, ($current / $target) * 100));
-}
-
-function savings_remaining_target(float $currentAmount, float $targetAmount): float
-{
-    return max(0.0, $targetAmount - $currentAmount);
-}
-
-function savings_max_deposit(float $availableCash, float $currentAmount, float $targetAmount): float
-{
-    return max(0.0, min($availableCash, savings_remaining_target($currentAmount, $targetAmount)));
-}
-
-function savings_target_covers_balance(float $targetAmount, float $currentAmount): bool
-{
-    return $targetAmount + 0.00001 >= $currentAmount;
 }

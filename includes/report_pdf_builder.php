@@ -20,9 +20,6 @@ function report_type_palette(string $type): array
     return match ($type) {
         'income' => [[21, 128, 61], [236, 253, 243]],
         'expense' => [[220, 38, 38], [254, 242, 242]],
-        'savings_deposit' => [[13, 148, 136], [240, 253, 250]],
-        'savings_withdrawal' => [[79, 70, 229], [238, 242, 255]],
-        'savings_spend' => [[180, 83, 9], [255, 247, 237]],
         default => [[70, 85, 105], [241, 245, 249]],
     };
 }
@@ -54,40 +51,28 @@ function draw_summary_card(SimplePdfDocument $pdf, float $x, float $y, float $w,
 
 function draw_table_header(SimplePdfDocument $pdf, float $topY): void
 {
-    $height = 28;
+    $height = 26;
     $bottom = $topY - $height;
-    $baseline = pdf_centered_baseline($bottom, $height, 7.1);
+    $baseline = pdf_centered_baseline($bottom, $height, 6.8);
 
     $pdf->rect(44, $bottom, 754, $height, [238, 243, 250]);
-    $pdf->text(52, $baseline, 'TANGGAL', 7.1, true, [70, 85, 105]);
-    $pdf->text(113, $baseline, 'KATEGORI / TUJUAN', 7.1, true, [70, 85, 105]);
-    $pdf->text(236, $baseline, 'JENIS', 7.1, true, [70, 85, 105]);
-    $pdf->text(351, $baseline, 'KETERANGAN', 7.1, true, [70, 85, 105]);
-    $pdf->text(704, $baseline, 'NILAI', 7.1, true, [70, 85, 105], 'right');
-    $pdf->text(790, $bottom + 16.2, 'DAMPAK UANG', 6.2, true, [70, 85, 105], 'right');
-    $pdf->text(790, $bottom + 7.2, 'TERSEDIA', 6.2, true, [70, 85, 105], 'right');
+    $pdf->text(52, $baseline, 'TANGGAL', 6.8, true, [70, 85, 105]);
+    $pdf->text(112, $baseline, 'KATEGORI', 6.8, true, [70, 85, 105]);
+    $pdf->text(244, $baseline, 'KETERANGAN', 6.8, true, [70, 85, 105]);
+    $pdf->text(538, $baseline, 'JENIS', 6.8, true, [70, 85, 105], 'center');
+    $pdf->text(690, $baseline, 'NOMINAL', 6.8, true, [70, 85, 105], 'right');
+    $pdf->text(790, $bottom + 16.0, 'SALDO', 6.1, true, [70, 85, 105], 'right');
+    $pdf->text(790, $bottom + 7.2, 'BERJALAN', 5.8, true, [70, 85, 105], 'right');
 }
 
 function report_category_label(array $row): string
 {
-    $goalName = savings_goal_history_name(
-        $row['goal_name'] ?? null,
-        null,
-        (int)($row['savings_goal_id'] ?? 0)
-    );
-
-    if ($row['type'] === 'savings_spend') {
-        return transaction_category_history_name($row['category_name'] ?? null) . ' - ' . $goalName;
-    }
-    if ($row['source'] === 'savings') {
-        return 'Tabungan - ' . $goalName;
-    }
     return transaction_category_history_name($row['category_name'] ?? null);
 }
 
 function draw_transaction_row(SimplePdfDocument $pdf, array $row, float $rowTopY, int $index): void
 {
-    $rowHeight = 25;
+    $rowHeight = 18;
     $rowBottom = $rowTopY - $rowHeight;
 
     if ($index % 2 === 1) {
@@ -99,26 +84,29 @@ function draw_transaction_row(SimplePdfDocument $pdf, array $row, float $rowTopY
     $date = date('d/m/Y', strtotime($row['transaction_date']));
     $category = report_category_label($row);
     $description = trim(normalize_user_facing_money_terms($row['description'] ?? '')) ?: '-';
-    $activityAmount = transaction_amount_prefix($row['type']) . ' ' . format_rupiah($row['amount']);
-    $cashEffectValue = transaction_cash_effect($row['type'], (float)$row['amount']);
-    $cashEffect = ($cashEffectValue > 0 ? '+ ' : ($cashEffectValue < 0 ? '- ' : '')) . format_rupiah(abs($cashEffectValue));
-    $cashColor = $cashEffectValue > 0 ? [21, 128, 61] : ($cashEffectValue < 0 ? [220, 38, 38] : [100, 116, 139]);
 
-    $bodyBaseline = pdf_centered_baseline($rowBottom, $rowHeight, 7.7);
-    $pdf->text(52, $bodyBaseline, $date, 7.7, false, [47, 59, 79]);
-    $pdf->text(113, $bodyBaseline, $category, 7.7, true, [36, 48, 67], 'left', 132);
+    // Nominal adalah besar transaksi pada baris tersebut. Saldo setelah
+    // transaksi adalah saldo berjalan setelah pemasukan/pengeluaran diterapkan.
+    $nominal = format_rupiah(abs((float)$row['amount']));
+    $balanceAfterValue = (float)($row['balance_after'] ?? 0);
+    $balanceAfter = ($balanceAfterValue < 0 ? '- ' : '') . format_rupiah(abs($balanceAfterValue));
+    $balanceColor = $balanceAfterValue < 0 ? [220, 38, 38] : [55, 48, 163];
 
-    $badgeX = 228;
-    $badgeWidth = 114;
-    $badgeHeight = 16;
+    $bodyBaseline = pdf_centered_baseline($rowBottom, $rowHeight, 6.8);
+    $pdf->text(52, $bodyBaseline, $date, 6.8, false, [47, 59, 79], 'left', 54);
+    $pdf->text(112, $bodyBaseline, $category, 6.8, true, [36, 48, 67], 'left', 124);
+    $pdf->text(244, $bodyBaseline, $description, 6.7, false, [71, 85, 105], 'left', 238);
+
+    $badgeWidth = 82;
+    $badgeHeight = 13;
+    $badgeX = 497;
     $badgeBottom = $rowBottom + (($rowHeight - $badgeHeight) / 2);
-    $badgeBaseline = pdf_centered_baseline($badgeBottom, $badgeHeight, 6.1);
+    $badgeBaseline = pdf_centered_baseline($badgeBottom, $badgeHeight, 5.4);
     $pdf->rect($badgeX, $badgeBottom, $badgeWidth, $badgeHeight, $typeBg);
-    $pdf->text($badgeX + 8, $badgeBaseline, transaction_type_label($row['type']), 6.1, true, $typeColor, 'left', $badgeWidth - 16);
+    $pdf->text($badgeX + ($badgeWidth / 2), $badgeBaseline, transaction_type_label($row['type']), 5.4, true, $typeColor, 'center', $badgeWidth - 12);
 
-    $pdf->text(351, $bodyBaseline, $description, 7.5, false, [71, 85, 105], 'left', 250);
-    $pdf->text(704, $bodyBaseline, $activityAmount, 7.7, true, $typeColor, 'right', 92);
-    $pdf->text(790, $bodyBaseline, $cashEffect, 7.7, true, $cashColor, 'right', 78);
+    $pdf->text(690, $bodyBaseline, $nominal, 6.8, true, [36, 48, 67], 'right', 92);
+    $pdf->text(790, $bodyBaseline, $balanceAfter, 6.8, true, $balanceColor, 'right', 92);
 }
 
 function draw_page_footer(SimplePdfDocument $pdf, int $pageNumber, int $pageCount): void
@@ -130,9 +118,11 @@ function draw_page_footer(SimplePdfDocument $pdf, int $pageNumber, int $pageCoun
 
 function build_finance_report_pdf(array $report, string $month = '', string $type = '', string $userName = 'Pengguna'): string
 {
-    $firstPageCapacity = 13;
-    $nextPageCapacity = 17;
-    $rows = $report['rows'];
+    $firstPageCapacity = 19;
+    $nextPageCapacity = 24;
+    // Laporan ekspor dibaca kronologis agar perubahan saldo berjalan terlihat
+    // alami dari transaksi terlama menuju transaksi terbaru.
+    $rows = array_reverse($report['rows']);
     $pageChunks = [array_splice($rows, 0, $firstPageCapacity)];
     while ($rows) {
         $pageChunks[] = array_splice($rows, 0, $nextPageCapacity);
@@ -149,20 +139,18 @@ function build_finance_report_pdf(array $report, string $month = '', string $typ
         draw_report_header($pdf, $period, $typeLabel, $userName, !$isFirstPage);
 
         if ($isFirstPage) {
-            $cardWidth = 142.8;
+            $cardWidth = (754 - 20) / 3;
             $gap = 10;
             $labels = [
                 ['Pemasukan', $report['income'], [21, 128, 61]],
-                ['Pengeluaran uang', $report['expense'], [220, 38, 38]],
-                ['Transfer tabungan', $report['savings_deposit'], [13, 148, 136]],
-                ['Belanja tabungan', $report['savings_spend'], [180, 83, 9]],
-                ['Perubahan uang', $report['cash_net'], [79, 70, 229]],
+                ['Pengeluaran', $report['expense'], [220, 38, 38]],
+                ['Perubahan saldo', $report['net'], [79, 70, 229]],
             ];
             foreach ($labels as $i => [$label, $value, $color]) {
                 draw_summary_card($pdf, 44 + (($cardWidth + $gap) * $i), 438, $cardWidth, $label, format_rupiah($value), $color);
             }
-            $pdf->text(44, 426, 'Pencairan ke uang tersedia: ' . format_rupiah($report['savings_withdrawal']) . '   |   Perubahan saldo keseluruhan: ' . format_rupiah($report['asset_net']), 8.0, true, [79, 70, 229]);
-            $tableTop = 406;
+            $pdf->text(44, 426, 'Nominal adalah nilai transaksi. Saldo setelah menunjukkan saldo berjalan sesudah transaksi diterapkan.', 7.3, true, [79, 70, 229]);
+            $tableTop = 408;
         } else {
             $tableTop = 505;
         }
@@ -172,10 +160,10 @@ function build_finance_report_pdf(array $report, string $month = '', string $typ
             $pdf->rect(44, $tableTop - 74, 754, 46, [249, 251, 254], [232, 236, 243], 0.6);
             $pdf->text(421, $tableTop - 54, 'Tidak ada transaksi pada filter laporan ini.', 10, false, [100, 116, 139], 'center');
         } else {
-            $rowTopY = $tableTop - 28;
+            $rowTopY = $tableTop - 26;
             foreach ($pageRows as $rowIndex => $row) {
                 draw_transaction_row($pdf, $row, $rowTopY, $rowIndex);
-                $rowTopY -= 25;
+                $rowTopY -= 18;
             }
         }
 

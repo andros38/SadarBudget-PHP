@@ -200,36 +200,20 @@ function xlsx_date_cell(string $reference, string $date, int $styleId = 0): stri
 
 function xlsx_report_row_label(array $row): string
 {
-    $goalName = savings_goal_history_name(
-        $row['goal_name'] ?? null,
-        null,
-        (int)($row['savings_goal_id'] ?? 0)
-    );
-
-    if ($row['type'] === 'savings_spend') {
-        return transaction_category_history_name($row['category_name'] ?? null) . ' — ' . $goalName;
-    }
-
-    return $row['source'] === 'savings'
-        ? 'Tabungan — ' . $goalName
-        : transaction_category_history_name($row['category_name'] ?? null);
+    return transaction_category_history_name($row['category_name'] ?? null);
 }
 
 function build_finance_report_xlsx(array $report, string $month = '', string $type = ''): string
 {
     $summaryRows = [
         ['Total pemasukan', (float)$report['income']],
-        ['Pengeluaran dari uang tersedia', (float)$report['expense']],
-        ['Transfer ke tabungan', (float)$report['savings_deposit']],
-        ['Pencairan ke uang tersedia', (float)$report['savings_withdrawal']],
-        ['Pengeluaran dari tabungan', (float)$report['savings_spend']],
-        ['Perubahan uang tersedia', (float)$report['cash_net']],
-        ['Perubahan saldo keseluruhan', (float)$report['asset_net']],
+        ['Total pengeluaran', (float)$report['expense']],
+        ['Perubahan saldo transaksi', (float)$report['net']],
     ];
 
     $sheetRows = [];
     $sheetRows[] = '<row r="1" ht="30" customHeight="1">'
-        . xlsx_inline_string_cell('A1', APP_NAME . ' — Laporan Keuangan Pribadi', 1)
+        . xlsx_inline_string_cell('A1', APP_NAME . ' — Laporan Transaksi', 1)
         . '</row>';
     $sheetRows[] = '<row r="2">'
         . xlsx_inline_string_cell('A2', 'Periode', 2)
@@ -249,22 +233,25 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
         $rowNumber++;
     }
 
-    $headerRow = 12;
-    $sheetRows[] = '<row r="11" ht="8" customHeight="1"/>';
-    $sheetRows[] = '<row r="12" ht="26" customHeight="1">'
-        . xlsx_inline_string_cell('A12', 'Tanggal', 3)
-        . xlsx_inline_string_cell('B12', 'Kategori / Tujuan', 3)
-        . xlsx_inline_string_cell('C12', 'Keterangan', 3)
-        . xlsx_inline_string_cell('D12', 'Jenis', 3)
-        . xlsx_inline_string_cell('E12', 'Nilai aktivitas', 3)
-        . xlsx_inline_string_cell('F12', 'Dampak uang tersedia', 3)
+    $headerRow = 8;
+    $sheetRows[] = '<row r="7" ht="20" customHeight="1">'
+        . xlsx_inline_string_cell('A7', 'Nominal adalah nilai transaksi. Saldo setelah transaksi adalah saldo berjalan sesudah transaksi diterapkan.', 0)
+        . '</row>';
+    $sheetRows[] = '<row r="8" ht="26" customHeight="1">'
+        . xlsx_inline_string_cell('A8', 'Tanggal', 3)
+        . xlsx_inline_string_cell('B8', 'Kategori', 3)
+        . xlsx_inline_string_cell('C8', 'Keterangan', 3)
+        . xlsx_inline_string_cell('D8', 'Jenis', 3)
+        . xlsx_inline_string_cell('E8', 'Nominal', 3)
+        . xlsx_inline_string_cell('F8', 'Saldo berjalan', 3)
         . '</row>';
 
-    $rowNumber = 13;
-    foreach ($report['rows'] as $row) {
+    $rowNumber = 9;
+    // Ekspor disusun kronologis agar saldo berjalan dapat dibaca dari atas ke bawah.
+    foreach (array_reverse($report['rows']) as $row) {
         $amount = (float)$row['amount'];
-        $activityValue = (transaction_amount_prefix($row['type']) === '+' ? 1 : -1) * $amount;
-        $cashEffect = transaction_cash_effect($row['type'], $amount);
+        $nominalValue = abs($amount);
+        $balanceAfter = (float)($row['balance_after'] ?? 0);
         $description = trim(normalize_user_facing_money_terms($row['description'] ?? ''));
 
         $sheetRows[] = '<row r="' . $rowNumber . '" ht="23" customHeight="1">'
@@ -272,39 +259,39 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
             . xlsx_inline_string_cell('B' . $rowNumber, xlsx_report_row_label($row), 8)
             . xlsx_inline_string_cell('C' . $rowNumber, $description !== '' ? $description : '-', 8)
             . xlsx_inline_string_cell('D' . $rowNumber, transaction_type_label((string)$row['type']), 8)
-            . xlsx_number_cell('E' . $rowNumber, $activityValue, 6)
-            . xlsx_number_cell('F' . $rowNumber, $cashEffect, 6)
+            . xlsx_number_cell('E' . $rowNumber, $nominalValue, 6)
+            . xlsx_number_cell('F' . $rowNumber, $balanceAfter, 10)
             . '</row>';
         $rowNumber++;
     }
 
-    $lastRow = max(12, $rowNumber - 1);
+    $lastRow = max(8, $rowNumber - 1);
 
     $worksheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
         . '<sheetPr><outlinePr summaryBelow="1" summaryRight="1"/></sheetPr>'
         . '<dimension ref="A1:F' . $lastRow . '"/>'
         . '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
-        . '<pane ySplit="12" topLeftCell="A13" activePane="bottomLeft" state="frozen"/>'
-        . '<selection pane="bottomLeft" activeCell="A13" sqref="A13"/>'
+        . '<pane ySplit="8" topLeftCell="A9" activePane="bottomLeft" state="frozen"/>'
+        . '<selection pane="bottomLeft" activeCell="A9" sqref="A9"/>'
         . '</sheetView></sheetViews>'
         . '<sheetFormatPr defaultRowHeight="18"/>'
         . '<cols>'
-        . '<col min="1" max="1" width="26" customWidth="1"/>'
-        . '<col min="2" max="2" width="31" customWidth="1"/>'
-        . '<col min="3" max="3" width="42" customWidth="1"/>'
-        . '<col min="4" max="4" width="27" customWidth="1"/>'
-        . '<col min="5" max="6" width="19" customWidth="1"/>'
+        . '<col min="1" max="1" width="24" customWidth="1"/>'
+        . '<col min="2" max="2" width="25" customWidth="1"/>'
+        . '<col min="3" max="3" width="40" customWidth="1"/>'
+        . '<col min="4" max="4" width="18" customWidth="1"/>'
+        . '<col min="5" max="5" width="18" customWidth="1"/>'
+        . '<col min="6" max="6" width="23" customWidth="1"/>'
         . '</cols>'
         . '<sheetData>' . implode('', $sheetRows) . '</sheetData>'
         // Urutan elemen mengikuti skema SpreadsheetML. Microsoft Excel
         // mengharuskan autoFilter muncul sebelum mergeCells.
-        . '<autoFilter ref="A12:F' . $lastRow . '"/>'
-        . '<mergeCells count="10">'
-        . '<mergeCell ref="A1:F1"/>'
+        . '<autoFilter ref="A8:F' . $lastRow . '"/>'
+        . '<mergeCells count="7">'
+        . '<mergeCell ref="A1:F1"/><mergeCell ref="A7:F7"/>'
         . '<mergeCell ref="B2:F2"/><mergeCell ref="B3:F3"/>'
         . '<mergeCell ref="B4:F4"/><mergeCell ref="B5:F5"/><mergeCell ref="B6:F6"/>'
-        . '<mergeCell ref="B7:F7"/><mergeCell ref="B8:F8"/><mergeCell ref="B9:F9"/><mergeCell ref="B10:F10"/>'
         . '</mergeCells>'
         . '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
         . '<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0" paperSize="9"/>'
@@ -312,9 +299,10 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
 
     $stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        . '<numFmts count="2">'
+        . '<numFmts count="3">'
         . '<numFmt numFmtId="164" formatCode="&quot;Rp&quot; #,##0;[Red]-&quot;Rp&quot; #,##0;&quot;Rp&quot; 0"/>'
         . '<numFmt numFmtId="165" formatCode="dd/mm/yyyy"/>'
+        . '<numFmt numFmtId="166" formatCode="[Green]+&quot;Rp&quot; #,##0;[Red]-&quot;Rp&quot; #,##0;&quot;Rp&quot; 0"/>'
         . '</numFmts>'
         . '<fonts count="4">'
         . '<font><sz val="11"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
@@ -334,7 +322,7 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
         . '<border><left style="thin"><color rgb="FFD8E0EB"/></left><right style="thin"><color rgb="FFD8E0EB"/></right><top style="thin"><color rgb="FFD8E0EB"/></top><bottom style="thin"><color rgb="FFD8E0EB"/></bottom><diagonal/></border>'
         . '</borders>'
         . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        . '<cellXfs count="10">'
+        . '<cellXfs count="11">'
         . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>'
         . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
         . '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
@@ -343,7 +331,9 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
         . '<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
         . '<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'
         . '<xf numFmtId="164" fontId="3" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'
-        . '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
+        . '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'
+        . '<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
+        . '<xf numFmtId="164" fontId="3" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>'
         . '</cellXfs>'
         . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
         . '</styleSheet>';
@@ -385,7 +375,7 @@ function build_finance_report_xlsx(array $report, string $month = '', string $ty
         . '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
         . 'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
         . 'xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        . '<dc:title>' . xlsx_xml_escape(APP_NAME . ' — Laporan Keuangan Pribadi') . '</dc:title>'
+        . '<dc:title>' . xlsx_xml_escape(APP_NAME . ' — Laporan Transaksi') . '</dc:title>'
         . '<dc:creator>' . xlsx_xml_escape(APP_NAME) . '</dc:creator>'
         . '<cp:lastModifiedBy>' . xlsx_xml_escape(APP_NAME) . '</cp:lastModifiedBy>'
         . '<dcterms:created xsi:type="dcterms:W3CDTF">' . $timestamp . '</dcterms:created>'

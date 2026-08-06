@@ -1,5 +1,29 @@
 <?php
-require_once __DIR__ . '/../config.php';
+$configPath = dirname(__DIR__) . '/config.php';
+
+if (!is_file($configPath)) {
+    if (PHP_SAPI === 'cli') {
+        throw new RuntimeException('config.php belum tersedia. Jalankan install.php atau salin config.example.php menjadi config.php.');
+    }
+
+    $documentRoot = isset($_SERVER['DOCUMENT_ROOT']) ? realpath((string)$_SERVER['DOCUMENT_ROOT']) : false;
+    $applicationRoot = realpath(dirname(__DIR__));
+    $basePath = '';
+
+    if ($documentRoot !== false && $applicationRoot !== false) {
+        $normalizedDocumentRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
+        $normalizedApplicationRoot = str_replace('\\', '/', $applicationRoot);
+        if (str_starts_with($normalizedApplicationRoot, $normalizedDocumentRoot)) {
+            $basePath = substr($normalizedApplicationRoot, strlen($normalizedDocumentRoot));
+        }
+    }
+
+    $installUrl = rtrim($basePath, '/') . '/install.php';
+    header('Location: ' . ($installUrl !== '' ? $installUrl : 'install.php'));
+    exit;
+}
+
+require_once $configPath;
 
 function db(): PDO
 {
@@ -21,7 +45,6 @@ function db(): PDO
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 
-    // Menyamakan charset dan collation koneksi dengan schema aplikasi.
     $pdo->exec('SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci');
 
     return $pdo;
